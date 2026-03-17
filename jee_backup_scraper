@@ -1,0 +1,262 @@
+#!/usr/bin/env python3
+"""
+JEE Main Website Scraper
+Monitors https://jeemain.nta.nic.in for new updates and notifications
+"""
+
+import requests
+from bs4 import BeautifulSoup
+import json
+import time
+import os
+from datetime import datetime
+from pathlib import Path
+
+# Optional: Desktop notifications (install plyer if you want this)
+try:
+    from plyer import notification
+    NOTIFICATIONS_ENABLED = True
+except ImportError:
+    NOTIFICATIONS_ENABLED = False
+    print("Desktop notifications disabled. Install 'plyer' for notifications.")
+
+
+class JEEMainScraper:
+    def __init__(self, config_file='config.json', state_file='seen_updates.json'):
+        """Initialize the scraper with configuration"""
+        self.config = self._load_config(config_file)
+        self.state_file = state_file
+        self.seen_updates = self._load_state()
+        self.url = self.config.get('url', 'https://jeemain.nta.nic.in')
+        self.check_interval = self.config.get('check_interval_seconds', 300)  # 5 minutes default
+        
+    def _load_config(self, config_file):
+        """Load configuration from JSON file"""
+        if os.path.exists(config_file):
+            with open(config_file, 'r') as f:
+                return json.load(f)
+        return {}
+    
+    def _load_state(self):
+        """Load previously seen updates from JSON file"""
+        if os.path.exists(self.state_file):
+            try:
+                with open(self.state_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except json.JSONDecodeError:
+                print("State file corrupted. Starting fresh.")
+                return []
+        return []
+    
+    def _save_state(self, updates):
+        """Save current state to JSON file"""
+        with open(self.state_file, 'w', encoding='utf-8') as f:
+            json.dump(updates, f, indent=2, ensure_ascii=False)
+    
+    def fetch_page(self):
+        """Fetch the JEE Main website"""
+        try:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+            response = requests.get(self.url, headers=headers, timeout=30)
+            response.raise_for_status()
+            return response.text
+        except requests.RequestException as e:
+            print(f" Error fetching website: {e}")
+            return None
+    
+    def parse_updates(self, html_content):
+        """Parse the HTML and extract update links"""
+        soup = BeautifulSoup(html_content, 'html.parser')
+        updates = []
+        
+        # Strategy: Find multiple possible sections where updates might be
+        # 1. Look for "Latest News" or "Public Notices" sections
+        # 2. Extract all <a> tags from these sections
+        
+        # Common selectors for government websites
+        selectors = [
+            'div#public-notices-content a',
+            'div.gen-list a',
+            'div.latest-news a',
+            'div.updates a',
+            'ul.news-list a',
+            'div.notice-board a',
+            '.marquee a',
+            'div[class*="notice"] a',
+            'div[class*="news"] a',
+        ]
+        
+        links_found = set()
+        
+        for selector in selectors:
+            elements = soup.select(selector)
+            for element in elements:
+                href = element.get('href', '')
+                text = element.get_text(strip=True)
+                
+                # Skip empty or javascript links
+                if not href or href.startswith('javascript:') or not text:
+                    continue
+                
+                # Make absolute URL if relative
+                if href.startswith('/'):
+                    href = self.url + href
+                elif not href.startswith('http'):
+                    href = self.url + '/' + href
+                
+                links_found.add((href, text))
+        
+        # Also try to find all <a> tags with PDF links (common for notices)
+        pdf_links = soup.find_all('a', href=lambda x: x and '.pdf' in x.lower())
+        for link in pdf_links:
+            href = link.get('href', '')
+            text = link.get_text(strip=True)
+            if href and text:
+                if href.startswith('/'):
+                    href = self.url + href
+                elif not href.startswith('http'):
+                    href = self.url + '/' + href
+                links_found.add((href, text))
+        
+        # Convert to list of dictionaries
+        for href, text in links_found:
+            updates.append({
+                'href': href,
+                'text': text,
+                'timestamp': datetime.now().isoformat()
+            })
+        
+        return updates
+    
+    def find_new_updates(self, current_updates):
+        """Compare current updates with seen updates to find new ones"""
+        seen_hrefs = {update['href'] for update in self.seen_updates}
+        new_updates = [
+            update for update in current_updates 
+            if update['href'] not in seen_hrefs
+        ]
+        return new_updates
+    
+    def notify(self, new_updates):
+        """Send notifications for new updates"""
+        if not new_updates:
+            return
+        
+        print(f"\n{'='*60}")
+        print(f" {len(new_updates)} NEW UPDATE(S) FOUND!")
+        print(f"{'='*60}")
+        
+        for i, update in enumerate(new_updates, 1):
+            print(f"\n#{i}")
+            print(f" {update['text']}")
+            print(f" {update['href']}")
+            print(f" Detected at: {update['timestamp']}")
+        
+        print(f"\n{'='*60}\n")
+        
+        # Desktop notification (if enabled)
+        if NOTIFICATIONS_ENABLED:
+            summary = f"{len(new_updates)} new JEE Main update(s)"
+            message = new_updates[0]['text'][:100] if new_updates else ""
+            try:
+                notification.notify(
+                    title='JEE Main Update Alert',
+                    message=f"{summary}\n{message}",
+                    app_name='JEE Scraper',
+                    timeout=10
+                )
+            except Exception as e:
+                print(f"  Desktop notification failed: {e}")
+    
+    def run_once(self):
+        """Run a single check cycle"""
+        print(f"🔍 Checking {self.url} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        
+        html_content = self.fetch_page()
+        if not html_content:
+            print("  Could not fetch page. Will retry later.")
+            return
+        
+        current_updates = self.parse_updates(html_content)
+        
+        if not current_updates:
+            print("  No updates found on the page. Check if selectors need updating.")
+            return
+        
+        print(f" Total updates found: {len(current_updates)}")
+        
+        # First run: initialize state without notifying
+        if not self.seen_updates:
+            print("ℹ  First run - initializing state with current updates")
+            self._save_state(current_updates)
+            self.seen_updates = current_updates
+            return
+        
+        # Find new updates
+        new_updates = self.find_new_updates(current_updates)
+        
+        if new_updates:
+            self.notify(new_updates)
+            # Update state
+            self._save_state(current_updates)
+            self.seen_updates = current_updates
+        else:
+            print(" No new updates")
+    
+    def run_continuous(self):
+        """Run the scraper continuously"""
+        print(" JEE Main Scraper Started")
+        print(f" Monitoring: {self.url}")
+        print(f"  Check interval: {self.check_interval} seconds")
+        print(f" State file: {self.state_file}")
+        print("-" * 60)
+        
+        try:
+            while True:
+                self.run_once()
+                print(f" Sleeping for {self.check_interval} seconds...")
+                print("-" * 60)
+                time.sleep(self.check_interval)
+        except KeyboardInterrupt:
+            print("\n\n  Scraper stopped by user")
+        except Exception as e:
+            print(f"\n Unexpected error: {e}")
+            raise
+
+
+def main():
+    """Main entry point"""
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Monitor JEE Main website for updates')
+    parser.add_argument('--once', action='store_true', help='Run once and exit')
+    parser.add_argument('--interval', type=int, help='Check interval in seconds')
+    parser.add_argument('--reset', action='store_true', help='Reset state (clear seen updates)')
+    
+    args = parser.parse_args()
+    
+    # Reset state if requested
+    if args.reset:
+        if os.path.exists('seen_updates.json'):
+            os.remove('seen_updates.json')
+            print(" State reset successfully")
+        return
+    
+    # Create scraper
+    scraper = JEEMainScraper()
+    
+    # Override interval if specified
+    if args.interval:
+        scraper.check_interval = args.interval
+    
+    # Run mode
+    if args.once:
+        scraper.run_once()
+    else:
+        scraper.run_continuous()
+
+
+if __name__ == '__main__':
+    main()
