@@ -3,6 +3,7 @@ how to make it work:
 STEP-1) download termux apk and also, termux:api apk from fdroid or github (not Playstore, that version is broke)
 
 STEP-2) run the following commands one by one:
+
 pkg update && pkg upgrade -y
 
 pkg install python git -y
@@ -11,7 +12,12 @@ pkg install python git -y
 git clone https://github.com/{MY CURRENT USERNAME, Without these brackets}/fackNTAandroid.git
 
 cd facknta
+
+
 pkg install libxml2 libxslt clang -y
+
+
+
 pip install -r requirements.txt
 
 pkg install termux-api -y
