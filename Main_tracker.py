@@ -6,9 +6,9 @@ import os
 import subprocess
 import threading
 import random
-import tkinter as tk
+#import tkinter as tk
 from datetime import datetime
-import pygame
+#import pygame
 import os
 os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
 URL = "https://jeemain.nta.nic.in/"
@@ -49,42 +49,17 @@ def fetch_timestamp():
 
     
 def play_alarm():
-    pygame.mixer.init()
-    pygame.mixer.music.load(ALARM_FILE)
-    pygame.mixer.music.set_volume(1.0)   # max volume
-    pygame.mixer.music.play(loops=-1)     # -1 = loop forever
-
-    # Keep the program running while playing
-    try:
-        while pygame.mixer.music.get_busy():
-            time.sleep(1)
-    except KeyboardInterrupt:
-        pygame.mixer.music.stop()
-
+    os.system("termux-media-player play alarm.mp3")
 
 def show_popup(old, new):
-    root = tk.Tk()
-    root.attributes("-fullscreen", True)
-    root.configure(bg="black")
-
-    msg = f"JEE SITE UPDATED\n\nOLD: {old}\nNEW: {new}"
-
-    label = tk.Label(root,
-                     text=msg,
-                     fg="red",
-                     bg="black",
-                     font=("Arial", 48, "bold"),
-                     justify="center")
-    label.pack(expand=True)
-
-    root.mainloop()
-
+    msg = f"OLD: {old} NEW: {new}"
+    os.system(f'termux-notification -t "🚨 JEE RESULTS ARE OUT! 🚨" -c "{msg}" --priority max --vibrate 1000,1000,1000')
 
 def alert(old, new):
     print("\nCHANGE DETECTED", datetime.now())
-
     threading.Thread(target=play_alarm, daemon=True).start()
     show_popup(old, new)
+
 
 
 def main():
