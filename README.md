@@ -1,7 +1,8 @@
 how to make it work:
 
-s1) download termux apk and also, termux:api apk from fdroid or github (not Playstore, that version is broke)
-s2) run the following commands one by one:
+STEP-1) download termux apk and also, termux:api apk from fdroid or github (not Playstore, that version is broke)
+
+STEP-2) run the following commands one by one:
 pkg update && pkg upgrade -y
 
 pkg install python git -y
